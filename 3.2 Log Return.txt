@@ -1,0 +1,85 @@
+# Install and load necessary packages if you haven't already
+# install.packages("xts")
+# install.packages("lubridate")
+# install.packages("quantmod")
+# install.packages("moments") # For skewness and kurtosis
+# install.packages("ggplot2") # For plotting
+
+library(xts)
+library(lubridate)
+library(quantmod) # For dailyReturn function, or can calculate manually
+library(moments)  # For skewness and kurtosis
+library(ggplot2)  # For plotting
+
+# 1. Create a data frame in R with the provided data
+data_raw <- data.frame(
+  Tanggal = c("28/05/2025", "27/05/2025", "26/05/2025", "23/05/2025", "22/05/2025",
+              "21/05/2025", "20/05/2025", "19/05/2025", "16/05/2025", "15/05/2025",
+              "14/05/2025", "09/05/2025", "08/05/2025", "07/05/2025", "06/05/2025",
+              "05/05/2025", "02/05/2025", "30/04/2025", "29/04/2025", "28/04/2025",
+              "25/04/2025", "24/04/2025", "23/04/2025", "22/04/2025", "21/04/2025",
+              "17/04/2025", "16/04/2025", "15/04/2025", "14/04/2025", "11/04/2025",
+              "10/04/2025", "09/04/2025", "08/04/2025", "27/03/2025", "26/03/2025",
+              "25/03/2025", "24/03/2025", "21/03/2025", "20/03/2025", "19/03/2025",
+              "18/03/2025", "17/03/2025", "14/03/2025", "13/03/2025", "12/03/2025",
+              "11/03/2025", "10/03/2025", "07/03/2025", "06/03/2025", "05/03/2025",
+              "04/03/2025", "03/03/2025"),
+  Terakhir = c(9400, 9450, 9625, 9675, 9650, 9700, 9475, 9500, 9300, 9275,
+               9275, 9000, 8975, 9075, 9025, 8975, 8975, 8825, 8725, 8775,
+               8600, 8475, 8725, 8500, 8300, 8500, 8475, 8575, 8400, 8275,
+               8225, 7925, 7775, 8500, 8525, 8050, 7950, 7900, 8375, 8325,
+               8300, 8600, 8750, 8975, 9125, 8925, 8925, 8925, 8975, 9000,
+               8850, 8800)
+)
+
+# 2. Convert 'Tanggal' to date format and sort the data frame
+data_raw$Tanggal <- dmy(data_raw$Tanggal) # dmy for day-month-year format
+df <- data_raw[order(data_raw$Tanggal), ]
+
+# 3. Calculate Log Return
+# Rt = ln(Pt / Pt-1)
+df$Log_Return <- log(df$Terakhir / lag(df$Terakhir, 1))
+
+# Remove the first NA value from Log_Return
+returns <- na.omit(df$Log_Return)
+
+# Display the data frame with Log Return
+print("Data frame dengan Log Return:")
+print(df)
+
+# 4. Hitung Statistik Deskriptif
+mean_return <- mean(returns)
+median_return <- median(returns)
+std_dev_return <- sd(returns)
+min_return <- min(returns)
+max_return <- max(returns)
+skewness_return <- skewness(returns)
+kurtosis_return <- kurtosis(returns)
+
+# Create a data frame for descriptive statistics
+descriptive_stats_df <- data.frame(
+  Statistic = c("Mean", "Median", "Standard Deviation", "Minimum", "Maximum", "Skewness", "Kurtosis"),
+  Value = c(mean_return, median_return, std_dev_return, min_return, max_return, skewness_return, kurtosis_return)
+)
+
+print("\nStatistik Deskriptif Log Return:")
+print(descriptive_stats_df)
+
+# 5. Grafik yang relevan
+# Plotting Log Returns over Time
+# Convert the data frame to an xts object for time series plotting (optional but good practice)
+# You can also use ggplot2 directly with the data frame 'df'
+df_xts <- xts(df$Log_Return, order.by = df$Tanggal)
+plot(df_xts, main = "Log Return Saham BBCA (Maret-Mei 2025)",
+     xlab = "Tanggal", ylab = "Log Return",
+     type = "l", col = "blue", major.ticks = "days", minor.ticks = FALSE)
+grid()
+
+# Plotting Histogram of Log Returns
+ggplot(df, aes(x = Log_Return)) +
+  geom_histogram(binwidth = 0.005, fill = "green", color = "black", alpha = 0.7) +
+  geom_density(color = "red", size = 1) + # Add density curve
+  labs(title = "Distribusi Log Return Saham BBCA",
+       x = "Log Return",
+       y = "Frekuensi") +
+  theme_minimal()
