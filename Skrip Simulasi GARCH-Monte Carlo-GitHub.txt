@@ -1,0 +1,424 @@
+
+# install.packages("rugarch")
+# install.packages("moments")
+# install.packages("ggplot2")
+# install.packages("lubridate") # Diperlukan untuk fungsi dmy()
+
+
+library(rugarch)
+library(moments) # Untuk skewness dan kurtosis
+library(ggplot2) # Untuk visualisasi residual
+library(lubridate) # Untuk konversi format tanggal
+
+# --- Bagian 2: Persiapan Data dan Perhitungan Log Return ---
+# Data mentah harga saham BBCA 
+data_raw <- data.frame(
+  Tanggal = c("28/05/2025", "27/05/2025", "26/05/2025", "23/05/2025", "22/05/2025",
+              "21/05/2025", "20/05/2025", "19/05/2025", "16/05/2025", "15/05/2025",
+              "14/05/2025", "09/05/2025", "08/05/2025", "07/05/2025", "06/05/2025",
+              "05/05/2025", "02/05/2025", "30/04/2025", "29/04/2025", "28/04/2025",
+              "25/04/2025", "24/04/2025", "23/04/2025", "22/04/2025", "21/04/2025",
+              "17/04/2025", "16/04/2025", "15/04/2025", "14/04/2025", "11/04/2025",
+              "10/04/2025", "09/04/2025", "08/04/2025", "27/03/2025", "26/03/2025",
+              "25/03/2025", "24/03/2025", "21/03/2025", "20/03/2025", "19/03/2025",
+              "18/03/2025", "17/03/2025", "14/03/2025", "13/03/2025", "12/03/2025",
+              "11/03/2025", "10/03/2025", "07/03/2025", "06/03/2025", "05/03/2025",
+              "04/03/2025", "03/03/2025"),
+  Terakhir = c(9400, 9450, 9625, 9675, 9650, 9700, 9475, 9500, 9300, 9275,
+               9275, 9000, 8975, 9075, 9025, 8975, 8975, 8825, 8725, 8775,
+               8600, 8475, 8725, 8500, 8300, 8500, 8475, 8575, 8400, 8275,
+               8225, 7925, 7775, 8500, 8525, 8050, 7950, 7900, 8375, 8325,
+               8300, 8600, 8750, 8975, 9125, 8925, 8925, 8925, 8975, 9000,
+               8850, 8800)
+)
+
+
+df <- data_raw # Salin data_raw ke df
+df$Tanggal <- dmy(df$Tanggal) # dmy untuk format hari-bulan-tahun
+df <- df[order(df$Tanggal), ] # Urutkan berdasarkan tanggal
+
+# Menghitung Log Return: Rt = ln(Pt / Pt-1)
+# Menggunakan lag() untuk mendapatkan harga hari sebelumnya
+df$Log_Return <- log(df$Terakhir / c(NA, df$Terakhir[-nrow(df)]))
+
+# Menghapus baris pertama yang akan memiliki NA untuk Log_Return
+returns <- na.omit(df$Log_Return)
+
+# --- Bagian 3: Estimasi Model GARCH(1,1) dengan MLE ---
+# 1. Spesifikasi Model GARCH(1,1)
+garch_spec_norm <- ugarchspec(
+  variance.model = list(model = "sGARCH", garchOrder = c(1, 1)),
+  mean.model = list(armaOrder = c(0, 0), include.mean = TRUE),
+  distribution.model = "norm"
+)
+
+# 2. Estimasi Model GARCH(1,1) dengan MLE
+garch_fit_norm <- ugarchfit(spec = garch_spec_norm, data = returns)
+
+# Menampilkan Ringkasan Hasil Estimasi
+cat("--------------------------------------------------\n")
+cat("Hasil Estimasi Model GARCH(1,1) (Distribusi Normal):\n")
+cat("--------------------------------------------------\n")
+print(garch_fit_norm)
+
+# 3. Memeriksa Persyaratan Stasioneritas dan Positif untuk Varians
+cat("\n--------------------------------------------------\n")
+cat("Pengecekan Persyaratan Parameter GARCH(1,1):\n")
+cat("--------------------------------------------------\n")
+
+# --- Ekstraksi parameter menggunakan coef() ---
+garch_coefs <- coef(garch_fit_norm)
+omega <- garch_coefs["omega"]
+alpha <- garch_coefs["alpha1"]
+beta <- garch_coefs["beta1"]
+
+
+cat(paste("Parameter omega (ω):", round(omega, 6), "\n"))
+cat(paste("Parameter alpha (α):", round(alpha, 6), "\n"))
+cat(paste("Parameter beta (β):", round(beta, 6), "\n"))
+cat(paste("Jumlah alpha + beta (α+β):", round(alpha + beta, 6), "\n"))
+
+# Pengecekan kondisi
+if (omega > 0) {
+  cat("Kondisi ω > 0: Terpenuhi\n")
+} else {
+  cat("Kondisi ω > 0: TIDAK Terpenuhi\n")
+}
+
+if (alpha >= 0) {
+  cat("Kondisi α ≥ 0: Terpenuhi\n")
+} else {
+  cat("Kondisi α ≥ 0: TIDAK Terpenuhi\n")
+}
+
+if (beta >= 0) {
+  cat("Kondisi β ≥ 0: Terpenuhi\n")
+} else {
+  cat("Kondisi β ≥ 0: TIDAK Terpenuhi\n")
+}
+
+if ((alpha + beta) < 1) {
+  cat("Kondisi α + β < 1 (Stasioneritas Varians): Terpenuhi\n")
+} else {
+  cat("Kondisi α + β < 1 (Stasioneritas Varians): TIDAK Terpenuhi (Model mungkin non-stasioner)\n")
+}
+
+# --- Bagian 4: Robustness Check: Analisis Residual Standar ---
+cat("\n--------------------------------------------------\n")
+cat("Robustness Check: Analisis Residual Standar\n")
+cat("--------------------------------------------------\n")
+
+# Ekstraksi residual standar
+standardized_residuals <- residuals(garch_fit_norm, standardize = TRUE)
+
+# Statistik Deskriptif Residual Standar
+sr_mean <- mean(standardized_residuals)
+sr_sd <- sd(standardized_residuals)
+sr_skew <- skewness(standardized_residuals)
+sr_kurt <- kurtosis(standardized_residuals) # Ingat, kurtosis di R biasanya excess kurtosis + 3 untuk distribusi normal
+
+cat(paste("Mean Residual Standar:", round(sr_mean, 6), "\n"))
+cat(paste("Standard Deviation Residual Standar:", round(sr_sd, 6), "\n"))
+cat(paste("Skewness Residual Standar:", round(sr_skew, 6), "\n"))
+cat(paste("Kurtosis Residual Standar (Excess Kurtosis + 3):", round(sr_kurt, 6), "\n"))
+
+
+# Interpretasi dan Rekomendasi
+if (abs(sr_skew) > 0.5) { # Ambang batas umum untuk skewness yang signifikan
+  cat("\nPERHATIAN: Skewness residual standar signifikan. Ini menunjukkan asimetri.\n")
+  cat("Distribusi normal mengasumsikan skewness mendekati 0.\n")
+} else {
+  cat("\nSkewness residual standar relatif rendah. Konsisten dengan normalitas.\n")
+}
+
+# Untuk kurtosis, nilai > 3 (untuk kurtosis total) atau > 0 (untuk excess kurtosis) menunjukkan fat tails.
+# Fungsi `kurtosis` dari paket `moments` mengembalikan kurtosis Fisher (excess kurtosis),
+if (sr_kurt > 3.5 || sr_kurt < 2.5) { # Kriteria sederhana untuk menyarankan distribusi alternatif
+  cat("PERHATIAN: Kurtosis residual standar menunjukkan 'fat tails' (nilai jauh dari 3).\n")
+  cat("Distribusi normal memiliki kurtosis tepat 3. Nilai yang lebih tinggi menunjukkan 'fat tails'.\n")
+} else {
+  cat("Kurtosis residual standar relatif mendekati 3. Konsisten dengan normalitas.\n")
+}
+
+
+# Visualisasi Residual Standar untuk mendukung analisis
+# Histogram
+hist_sr <- ggplot(data.frame(SR = standardized_residuals), aes(x = SR)) +
+  geom_histogram(aes(y = after_stat(density)), bins = 30, fill = "lightblue", color = "black") +
+  stat_function(fun = dnorm, args = list(mean = mean(standardized_residuals), sd = sd(standardized_residuals)), color = "red", size = 1) +
+  labs(title = "Histogram Residual Standar dengan Kurva Normal",
+       x = "Residual Standar", y = "Density") +
+  theme_minimal()
+print(hist_sr)
+
+# QQ-Plot
+qq_sr <- ggplot(data.frame(SR = standardized_residuals), aes(sample = SR)) +
+  stat_qq() +
+  stat_qq_line(color = "blue") +
+  labs(title = "QQ-Plot Residual Standar",
+       x = "Theoretical Quantiles", y = "Sample Quantiles") +
+  theme_minimal()
+print(qq_sr)
+
+
+# Rekomendasi berdasarkan Robustness Check
+if (abs(sr_skew) > 0.5 || sr_kurt > 3.5 || sr_kurt < 2.5) { # Kriteria sederhana untuk menyarankan distribusi alternatif
+  cat("\nREKOMENDASI: Berdasarkan analisis skewness dan kurtosis residual standar,\n")
+  cat("disarankan untuk mempertimbangkan estimasi ulang model GARCH(1,1)\n")
+  cat("dengan asumsi distribusi inovasi lain seperti Student's t-distribution ('std')\n")
+  cat("atau Generalized Error Distribution ('ged') untuk menangkap karakteristik data yang lebih baik.\n")
+
+  # Estimasi ulang dengan Student's t-distribution (jika diperlukan)
+  cat("\n--- Contoh Estimasi Ulang dengan Student's t-distribution ---\n")
+  garch_spec_std <- ugarchspec(
+    variance.model = list(model = "sGARCH", garchOrder = c(1, 1)),
+    mean.model = list(armaOrder = c(0, 0), include.mean = TRUE),
+    distribution.model = "std" # Asumsi distribusi Student's t
+  )
+  garch_fit_std <- ugarchfit(spec = garch_spec_std, data = returns)
+  print(garch_fit_std)
+
+  # Mengecek residual standar dari model 'std'
+  sr_std <- residuals(garch_fit_std, standardize = TRUE)
+  cat(paste("\nSkewness Residual Standar (Student's t):", round(skewness(sr_std), 6), "\n"))
+  cat(paste("Kurtosis Residual Standar (Student's t):", round(kurtosis(sr_std), 6), "\n"))
+
+} else {
+  cat("\nResidual standar menunjukkan karakteristik yang cukup konsisten dengan asumsi normalitas.\n")
+  cat("Tidak ada indikasi kuat untuk beralih ke distribusi inovasi alternatif.\n")
+}
+
+
+library(rugarch)
+
+# Asumsi: Objek 'garch_fit_norm' (model GARCH(1,1) yang telah diestimasi)
+
+cat("--------------------------------------------------\n")
+cat("Prediksi Volatilitas Bersyarat GARCH(1,1)\n")
+cat("--------------------------------------------------\n")
+
+# --- Prediksi Volatilitas Satu Periode ke Depan ---
+cat("\n--- Prediksi Volatilitas Satu Periode ke Depan (h=1) ---\n")
+
+# Menggunakan ugarchforecast untuk prediksi 1 langkah ke depan
+# n.ahead = jumlah periode ke depan yang akan diprediksi
+forecast_1step <- ugarchforecast(garch_fit_norm, n.ahead = 1)
+
+# Mengakses varians bersyarat yang diprediksi (sigma^2)
+# Output dari forecast_1step@forecast$sigma adalah standar deviasi, 
+# Varians harus dikuadratkan.
+# Untuk mendapatkan varians, mengambil elemen pertama (periode T+1) dari @forecast$sigma dan dikuadratkan
+predicted_sigma2_1step <- forecast_1step@forecast$sigma[1, 1]^2
+
+cat(paste0("Varians Bersyarat (σ^2) untuk periode T+1: ", round(predicted_sigma2_1step, 8), "\n"))
+cat(paste0("Standar Deviasi Bersyarat (σ) untuk periode T+1: ", round(sqrt(predicted_sigma2_1step), 8), "\n"))
+
+
+# --- Prediksi Volatilitas Multi-Periode ke Depan ---
+cat("\n--- Prediksi Volatilitas Multi-Periode ke Depan (contoh: h=5) ---\n")
+
+# Menentukan horizon prediksi (misal: 5 periode ke depan)
+horizon <- 5
+
+# Menggunakan ugarchforecast untuk prediksi multi-periode
+forecast_multi_step <- ugarchforecast(garch_fit_norm, n.ahead = horizon)
+
+# Mengakses varians bersyarat yang diprediksi untuk setiap langkah waktu
+# forecast_multi_step@forecast$sigma adalah matriks, dengan setiap baris adalah prediksi untuk periode t+1, t+2, dst.
+# Kita perlu mengkuadratkan setiap nilai standar deviasi untuk mendapatkan varians.
+predicted_sigma2_multi_step <- forecast_multi_step@forecast$sigma^2
+
+# Menampilkan hasil prediksi dalam bentuk tabel
+cat("\nPrediksi Varians Bersyarat (σ^2) untuk 5 Periode ke Depan:\n")
+# Membuat data frame untuk tampilan yang lebih rapi
+df_forecast_sigma2 <- data.frame(
+  Periode = 1:horizon,
+  Varians_Bersyarat = predicted_sigma2_multi_step[,1] # Ambil kolom pertama karena hanya 1 seri
+)
+print(df_forecast_sigma2)
+
+cat("\nCatatan:\n")
+cat("Prediksi ini dilakukan secara rekursif. Untuk GARCH(1,1),\n")
+cat("varians jangka panjang (long-run variance) adalah omega / (1 - alpha - beta).\n")
+cat("Prediksi volatilitas multi-periode akan cenderung mendekati varians jangka panjang ini.\n")
+
+# Menghitung varians jangka panjang (Long-Run Variance) sebagai referensi
+# Ekstraksi parameter
+garch_coefs <- coef(garch_fit_norm)
+omega <- garch_coefs["omega"]
+alpha <- garch_coefs["alpha1"]
+beta <- garch_coefs["beta1"]
+
+long_run_variance <- omega / (1 - alpha - beta)
+
+cat(paste0("Varians Jangka Panjang (Long-Run Variance): ", round(long_run_variance, 8), "\n"))
+
+# Visualisasi Prediksi Volatilitas
+# Buat data frame untuk plotting
+plot_data_sigma <- data.frame(
+  Periode = 1:horizon,
+  Sigma_Squared = predicted_sigma2_multi_step[,1],
+  Sigma = sqrt(predicted_sigma2_multi_step[,1])
+)
+
+ggplot(plot_data_sigma, aes(x = Periode)) +
+  geom_line(aes(y = Sigma_Squared), color = "blue", size = 1) +
+  geom_point(aes(y = Sigma_Squared), color = "blue", size = 2) +
+  geom_hline(yintercept = long_run_variance, linetype = "dashed", color = "red") +
+  labs(title = paste0("Prediksi Varians Bersyarat (GARCH(1,1)) untuk ", horizon, " Periode"),
+       x = "Periode ke Depan",
+       y = "Varians Bersyarat (sigma^2)") +
+  scale_x_continuous(breaks = 1:horizon) +
+  annotate("text", x = horizon * 0.8, y = long_run_variance * 1.05, 
+           label = paste0("Long-Run Variance: ", round(long_run_variance, 8)), color = "red") +
+  theme_minimal()
+
+
+library(rugarch)
+library(ggplot2)
+library(dplyr) # Untuk fungsi tail() dan %>%
+library(lubridate) # Untuk konversi format tanggal (jika belum dimuat)
+library(tidyr) # Untuk fungsi gather() yang digunakan di ggplot
+
+# Asumsi:
+# - df (dengan kolom 'Terakhir' dan 'Tanggal') sudah tersedia.
+# - garch_fit_norm (atau garch_fit_std jika Anda memilih distribusi Student's t) sudah tersedia.
+
+# Pilih model GARCH yang akan digunakan untuk simulasi
+# Jika model normal sudah cukup:
+garch_fit_selected <- garch_fit_norm
+# Jika Anda memutuskan untuk menggunakan model Student's t-distribution, ganti dengan:
+# garch_fit_selected <- garch_fit_std
+
+# Mendapatkan harga penutupan terakhir dari data historis
+last_price <- tail(df$Terakhir, 1)
+cat(paste0("Harga Penutupan Terakhir (S0): ", last_price, "\n"))
+
+# Mendapatkan parameter mu (drift) dari model GARCH yang dipilih
+mu_garch <- coef(garch_fit_selected)["mu"]
+cat(paste0("Estimasi Mean (mu) dari Model GARCH: ", round(mu_garch, 6), "\n"))
+
+# --- Mendapatkan jenis distribusi inovasi dari model GARCH yang dipilih ---
+# Menggunakan jalur yang lebih langsung untuk mengakses nama distribusi dari objek uGARCHfit
+dist_model <- garch_fit_selected@model$modeldesc$distribution
+cat(paste0("Distribusi Inovasi yang Digunakan dalam Model GARCH: ", dist_model, "\n"))
+
+# Jika distribusi adalah Student's t, mendapatkan derajat kebebasan (shape parameter)
+if (dist_model == "std") {
+  df_t_dist <- coef(garch_fit_selected)["shape"]
+  cat(paste0("Derajat Kebebasan (nu) untuk Student's t-distribution: ", round(df_t_dist, 2), "\n"))
+}
+
+# --- Pengaturan Simulasi Monte Carlo ---
+num_simulations <- 10000   # Jumlah jalur simulasi (sesuaikan sesuai kebutuhan)
+forecast_horizon_days <- 20 # Horizon proyeksi dalam hari (misal: 20 hari kerja)
+delta_t <- 1                # Langkah waktu (1 hari)
+
+# Prediksi volatilitas bersyarat (sigma_t) untuk horizon proyeksi menggunakan model GARCH
+# ugarchforecast akan memprediksi mean (mu) dan sigma (std. deviasi)
+garch_forecast_results <- ugarchforecast(garch_fit_selected, n.ahead = forecast_horizon_days, n.roll = 0, nsim = 1)
+
+# Ekstrak prediksi standar deviasi (sigma) dari hasil forecast
+# Ini adalah matriks dengan 1 kolom (karena nsim=1) dan 'forecast_horizon_days' baris
+sigma_forecast_values <- as.numeric(garch_forecast_results@forecast$sigma) # Konversi ke vektor numerik
+
+# Memastikan ukuran sigma_forecast_values sesuai dengan horizon
+if (length(sigma_forecast_values) != forecast_horizon_days) {
+  stop("Ukuran prediksi volatilitas tidak sesuai dengan horizon proyeksi.")
+}
+
+cat(paste0("\nSimulasi GARCH-Monte Carlo dengan ", num_simulations, " jalur dan horizon ", forecast_horizon_days, " hari.\n"))
+
+# Matriks untuk menyimpan hasil simulasi harga
+# Baris: setiap jalur simulasi
+# Kolom: setiap langkah waktu (dari hari 0 hingga hari ke-forecast_horizon_days)
+simulated_prices <- matrix(NA, nrow = num_simulations, ncol = forecast_horizon_days + 1)
+simulated_prices[, 1] <- last_price # Menginisialisasi semua jalur dengan harga penutupan terakhir
+
+# --- Loop Simulasi Monte Carlo ---
+for (i in 1:num_simulations) {
+  current_path <- numeric(forecast_horizon_days + 1)
+  current_path[1] <- last_price
+
+  for (t in 1:forecast_horizon_days) {
+    # Ambil volatilitas bersyarat (sigma_t) untuk langkah waktu ini
+    sigma_t <- sigma_forecast_values[t]
+
+    # Ambil random number Zt dari distribusi yang relevan
+    if (dist_model == "norm") {
+      Zt <- rnorm(1) # Distribusi Normal Standar
+    } else if (dist_model == "std") {
+      # Standardisasi dari Student's t-distribution
+      # Menggunakan rt(1, df=df_t_dist) untuk menggambar dari t-distribution
+      # Kemudian standardisasi agar memiliki mean 0 dan variance 1
+      # Catatan: Pembagian dengan sqrt(df/(df-2)) melakukan standardisasi ini jika df > 2.
+      # ugarchfit secara otomatis akan memberikan df > 2 jika estimasi berhasil.
+      if (df_t_dist > 2) {
+        Zt <- rt(1, df = df_t_dist) / sqrt(df_t_dist / (df_t_dist - 2))
+      } else {
+        # Jika df <= 2, varians distribusi t tidak terdefinisi atau tidak valid untuk standardisasi ini.
+        # Ini adalah kasus yang jarang terjadi jika model GARCH berhasil dikonvergensi.
+        # Namun, untuk keamanan, kita bisa memberikan peringatan dan fallback ke normal.
+        warning(paste0("Degrees of freedom for Student's t-distribution (", round(df_t_dist, 2), ") <= 2. Variance undefined. Using rnorm() for Zt in simulation ", i, ", day ", t, "."))
+        Zt <- rnorm(1) # Fallback ke normal jika df tidak valid
+      }
+    } else {
+      # Handle distribusi lain jika diperlukan (e.g., "ged")
+      stop(paste0("Distribusi inovasi '", dist_model, "' belum didukung dalam simulasi ini. Mohon sesuaikan kode."))
+    }
+
+    # Persamaan Geometric Brownian Motion yang dimodifikasi
+    # S(t+dt) = S(t) * exp( (mu - 0.5 * sigma_t^2) * dt + sigma_t * sqrt(dt) * Zt )
+    current_path[t + 1] <- current_path[t] * exp(
+      (mu_garch - 0.5 * sigma_t^2) * delta_t + sigma_t * sqrt(delta_t) * Zt
+    )
+  }
+  simulated_prices[i, ] <- current_path
+}
+
+cat("\nSimulasi selesai. Harga yang diproyeksikan tersimpan di objek 'simulated_prices'.\n")
+
+# --- Analisis dan Visualisasi Hasil Simulasi ---
+
+# Menampilkan beberapa jalur simulasi pertama
+cat("\nBeberapa Jalur Simulasi Harga Pertama:\n")
+print(head(simulated_prices[, 1:min(6, ncol(simulated_prices))], 5))
+
+# Plot beberapa jalur simulasi (contoh: 10 jalur pertama)
+plot_df <- data.frame(
+  Time = 0:forecast_horizon_days,
+  t(simulated_prices[1:min(10, num_simulations), ]) # Ambil 10 jalur pertama
+) %>%
+  tidyr::gather(key = "Path", value = "Price", -Time) # Mengubah format data untuk ggplot, gunakan tidyr::gather
+
+ggplot(plot_df, aes(x = Time, y = Price, group = Path)) +
+  geom_line(alpha = 0.7) +
+  labs(title = paste0("Simulasi Harga Saham (GARCH-Monte Carlo) - ", num_simulations, " Jalur"),
+       x = "Hari ke Depan",
+       y = "Harga Saham") +
+  theme_minimal() +
+  scale_x_continuous(breaks = 0:forecast_horizon_days)
+
+# Analisis Harga pada Akhir Horizon Proyeksi
+final_prices <- simulated_prices[, ncol(simulated_prices)]
+
+cat("\nStatistik Deskriptif Harga Proyeksi pada Akhir Horizon:\n")
+print(summary(final_prices))
+cat(paste0("Mean Harga Akhir: ", round(mean(final_prices), 2), "\n"))
+cat(paste0("Median Harga Akhir: ", round(median(final_prices), 2), "\n"))
+cat(paste0("Standar Deviasi Harga Akhir: ", round(sd(final_prices), 2), "\n"))
+
+# Histogram Harga Akhir
+ggplot(data.frame(Price = final_prices), aes(x = Price)) +
+  geom_histogram(bins = 50, fill = "darkgreen", color = "black", alpha = 0.7) +
+  labs(title = paste0("Distribusi Harga Saham pada Akhir Horizon (Hari ke-", forecast_horizon_days, ")"),
+       x = "Harga Saham", y = "Frekuensi") +
+  theme_minimal()
+
+# Menghitung VaR (Value at Risk) pada tingkat kepercayaan tertentu (misal: 95%)
+confidence_level <- 0.95
+VaR_level <- 1 - confidence_level
+VaR_price <- quantile(final_prices, probs = VaR_level)
+
+cat(paste0("\nValue at Risk (VaR) Harga (", confidence_level * 100, "%): ", round(VaR_price, 2), "\n"))
+cat(paste0("Artinya, ada kemungkinan ", (1 - confidence_level) * 100, "% harga saham akan jatuh di bawah ", round(VaR_price, 2), " pada akhir horizon proyeksi.\n"))
